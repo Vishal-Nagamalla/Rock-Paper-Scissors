@@ -68,14 +68,14 @@
              write(sockfd, "M|ROCK||", 8);
          }
          else if (buf[0] == 'R') {
-             static int count = 0;
-             if (count == 0) {
-                 write(sockfd, "C", 1);
-             } else {
-                 write(sockfd, "Q", 1);
-             }
-             count++;
-         }
+            static int count = 0;
+            if (count < 2) {
+                write(sockfd, "C||", strlen("C||"));
+            } else {
+                write(sockfd, "Q||", strlen("Q||"));
+            }
+            count++;
+        } 
      }
  
      close(sockfd);

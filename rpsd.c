@@ -21,7 +21,7 @@ static int active_count = 0;
 static pthread_mutex_t waiting_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void *client_thread(void *arg);
-void enqueue_player(int sockfd, const char *name);
+void enqueue_player(int sockfd, const char *name, int skip_check);
 int dequeue_two_players(waiting_player_t *p1, waiting_player_t *p2);
 int is_name_active(const char *name);
 void add_active_name(const char *name);
@@ -120,7 +120,7 @@ void *client_thread(void *arg)
         return NULL;
     }
 
-    enqueue_player(sockfd, name_out);
+    enqueue_player(sockfd, name_out, 0);
     return NULL;
 }
 
@@ -149,11 +149,11 @@ void remove_active_name(const char *name) {
     }
 }
 
-void enqueue_player(int sockfd, const char *name)
+void enqueue_player(int sockfd, const char *name, int skip_check)
 {
     pthread_mutex_lock(&waiting_mutex);
 
-    if (is_name_active(name)) {
+    if (!skip_check && is_name_active(name)) {
         write(sockfd, "R|L|Logged in||", 15);
         close(sockfd);
         pthread_mutex_unlock(&waiting_mutex);
@@ -172,29 +172,29 @@ void enqueue_player(int sockfd, const char *name)
     waiting_queue[waiting_count].sockfd = sockfd;
     waiting_count++;
 
-    add_active_name(name);
+    if (!skip_check) add_active_name(name);
 
     if (waiting_count >= 2) {
         waiting_player_t p1, p2;
         if (dequeue_two_players(&p1, &p2)) {
             match_args_t *margs = malloc(sizeof(match_args_t));
             if (!margs) {
-                fprintf(stderr, "Out of memory for match args\n");
+                fprintf(stderr, "Out of memory\n");
                 close(p1.sockfd);
                 close(p2.sockfd);
             } else {
                 margs->player1 = p1;
                 margs->player2 = p2;
-                pthread_t match_tid;
-                if (pthread_create(&match_tid, NULL, match_thread, margs) != 0) {
-                    perror("pthread_create match_thread");
+                pthread_t tid;
+                if (pthread_create(&tid, NULL, match_thread, margs) != 0) {
+                    perror("match pthread");
                     free(margs);
                     close(p1.sockfd);
                     close(p2.sockfd);
                     remove_active_name(p1.name);
                     remove_active_name(p2.name);
                 } else {
-                    pthread_detach(match_tid);
+                    pthread_detach(tid);
                 }
             }
         }

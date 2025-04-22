@@ -19,4 +19,4 @@ test.o: test.c
 	$(CC) $(CFLAGS) -c test.c -o test.o
 
 clean:
-	rm -f *.o rpsd test
+	rm -f *.o rpsd test test.o

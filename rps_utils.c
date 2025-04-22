@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include "rps_utils.h"
 
-extern void enqueue_player(int sockfd, const char *name);
+void enqueue_player(int sockfd, const char *name, int skip_check);
 extern void remove_active_name(const char *name);
 
 static int read_message(int sockfd, char *buf, size_t bufsize);
@@ -21,8 +21,7 @@ void *match_thread(void *arg)
 
     printf("Match started between %s and %s\n", p1.name, p2.name);
 
-    int stillPlaying = 1;
-    while (stillPlaying) {
+    while (1) {
         char msg1[128], msg2[128];
         snprintf(msg1, sizeof(msg1), "B|%s||", p2.name);
         snprintf(msg2, sizeof(msg2), "B|%s||", p1.name);
@@ -52,23 +51,25 @@ void *match_thread(void *arg)
 
         int c1 = read_continue_or_quit(p1.sockfd);
         int c2 = read_continue_or_quit(p2.sockfd);
-
         if (c1 < 0 || c2 < 0) goto cleanup;
 
         if (c1 == 1 && c2 == 1) {
-            continue;
-        } else if (c1 == 1) {
-            enqueue_player(p1.sockfd, p1.name);
+            continue;  // rematch
+        } else if (c1 == 1 && c2 == 0) {
+            enqueue_player(p1.sockfd, p1.name, 1);  // allow requeue
             close(p2.sockfd);
-        } else if (c2 == 1) {
-            enqueue_player(p2.sockfd, p2.name);
+            remove_active_name(p2.name);
+            return NULL;
+        } else if (c1 == 0 && c2 == 1) {
+            enqueue_player(p2.sockfd, p2.name, 1);
             close(p1.sockfd);
+            remove_active_name(p1.name);
+            return NULL;
         } else {
             close(p1.sockfd);
             close(p2.sockfd);
+            break;
         }
-
-        break;  // match ends
     }
 
 cleanup:
@@ -77,6 +78,7 @@ cleanup:
     remove_active_name(p2.name);
     return NULL;
 }
+
 
 int read_play_message(int sockfd, char *name_out, size_t name_size)
 {

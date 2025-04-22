@@ -1,10 +1,10 @@
-# CS214 Project IV: Rock, Paper, Scissors
+# CS214 Project IV: Rock, Paper, Scissors (Concurrent Games)
 
 ## Authors
 | **Name** | **NetID** |
 |----------|-----------|
-| [Vishal Nagamalla](https://github.com/Vishal-Nagamalla) | vn218 |
-| [Yuhan Li](https://github.com/HiT-T) | yl2355 |
+| [Vishal Nagamalla](https://github.com/Vishal-Nagamalla) | vn218 | 
+| [Yuhan Li](https://github.com/HiT-T) | yl1234 |
 
 ---
 
@@ -18,61 +18,76 @@ This project implements a **Rock-Paper-Scissors** multiplayer server, `rpsd`, wh
 - **Rock-Paper-Scissors Protocol (RPSP)**: Uses ASCII text messages delimited by `|` and `||`, with messages such as:
   - `P|PlayerName||` (client → server)  
   - `W|1||`, `B|OpponentName||`, `R|Result|OpponentMove||` (server → client)  
-  - `M|ROCK||`, `C`, `Q`, etc.
+  - `M|ROCK||`, `C||`, `Q||`, etc.
 - **Matchmaking**: Waits until at least two clients are available; then pairs them for a match.
 - **Result Handling**: Compares moves to decide **win** (W), **lose** (L), or **draw** (D), and sends a **Result** message to each player. A disconnect mid-match is a **forfeit** (F).
 - **Rematches**: Players can choose to **Continue** (C) or **Quit** (Q) after each round. If both continue, the server begins a new round with the same players.
-- **Concurrent Games** *(optional / full-credit)*: For full concurrency, `rpsd` supports multiple matches in parallel using threads or processes.
+- **Concurrent Games**: For full credit, `rpsd` supports multiple matches in parallel using **POSIX threads**, synchronized with mutexes.
 
 ---
 
 ## Design Choices
 
 - **Message Parsing**:  
-  - Implemented a simple **state machine** or **buffer reader** that accumulates TCP data and identifies complete messages by searching for the terminating `||`.
-  - Ensured strict adherence to the protocol format (`<LETTER>|<args>||` or single-letter messages like `C`/`Q`).
+  - Accumulates incoming TCP data one byte at a time, identifying complete messages by detecting the `||` suffix.
+  - Ensures strict adherence to the RPSP protocol format.
 
 - **Matchmaking Logic**:  
-  - Maintains a **queue of waiting players** (those who have sent `Play` but not yet matched).  
-  - When a second player arrives, pairs them with the waiting player and sends both `Begin` messages.
+  - Maintains a thread-safe **waiting queue**.
+  - When two players are ready, dequeues them and launches a **match thread**.
 
 - **Game Flow**:  
-  1. **Play/Wait** handshake (client sends `P|Name||`, server replies `W|1||`).  
-  2. **Begin**: When matched, server sends `B|OpponentName||`.  
-  3. **Moves**: Each client sends `M|ROCK||` / `M|PAPER||` / `M|SCISSORS||`.  
-  4. **Result**: Server decides winner and sends `R|<W/L/D/F>|<OpponentMove>||`.  
-  5. **Continue/Quit**: Clients reply `C` or `Q`. If both continue, new round begins; otherwise, server closes connections.
+  1. `P|Name||` → client initiates play request  
+  2. Server replies `W|1||`  
+  3. When matched, server sends `B|OpponentName||`  
+  4. Players send `M|ROCK||`, etc.  
+  5. Server replies `R|W/L/D/F|OpponentMove||`  
+  6. Players send `C||` to continue or `Q||` to quit
 
-- **Concurrency** *(if implemented)*:
-  - Uses **threads** (via `pthread_create()`) to handle each player or each match in parallel, synchronizing shared data (e.g., the waiting queue) with **mutexes**.
+- **Concurrency**:  
+  - Uses `pthread_create()` to spawn a match-handling thread per pair of players.
+  - Global queues and player lists are synchronized with `pthread_mutex`.
 
 - **Logging**:  
-  - Writes basic log info to `stdout` (accepted connections, match outcomes) for troubleshooting and verification.
+  - Prints connection events, match pairing, and game termination to `stdout` for transparency and debugging.
 
 ---
 
 ## Testing Strategy
 
 1. **Manual Testing (Telnet/Netcat)**  
-   - Connected via `telnet localhost <port>` or `nc localhost <port>` and typed messages (`P|Alice||`, `M|ROCK||`, etc.) to ensure correctness.
-   - Observed server responses, verifying message formats and correctness of RPS outcomes.
+   - Connected manually using `telnet` or `nc` to verify correct behavior and protocol compliance.
 
 2. **Automated Test Client**  
-   - Wrote a small C or Python script that automatically sends a sequence of RPSP messages and checks the server’s replies (e.g., to handle edge cases like early quit, malformed messages, etc.).
+   - Implemented a C-based test client (`tests/test.c`) that simulates a full RPS match, including rematch and quit behavior.
 
 3. **Concurrent Connections**  
-   - For concurrency, opened multiple client connections in quick succession to confirm that each pair could proceed through the match process independently.
+   - Launched multiple clients in rapid succession to test concurrent game handling. Verified isolation of matches and correctness of results.
 
 4. **Edge Cases**  
-   - **Forfeit**: Simulated a client disconnect (e.g., by killing the client process) mid-match and confirmed that the server sends `R|F|||` to the other player.  
-   - **Rematch**: Ensured that if both players send `C`, the server resets for a new round with the same players.  
-   - **Invalid Input**: Tested partially malformed messages, though robust error handling was optional.
+   - **Forfeit**: Simulated client disconnection mid-match and verified the opponent received `R|F|||`.  
+   - **Repeat Names**: Ensured that a second client attempting to use the same name is rejected with `R|L|Logged in||`.  
+   - **Rematches**: Confirmed that if one client sends `Q||` and the other `C||`, the latter is properly requeued.
 
 ---
 
 ## Compilation & Usage
 
-To compile the server:
+To compile the server and client:
 
 ```bash
 make
+```
+
+To run the server:
+
+```bash
+./rpsd <port>
+```
+
+To run test clients:
+
+```bash
+./tests/test 127.0.0.1 <port> Alice
+./tests/test 127.0.0.1 <port> Bob
+```
